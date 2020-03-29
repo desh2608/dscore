@@ -99,8 +99,6 @@ def main():
          file=sys.stderr)
     turns_list = [merge_turns(turns) for turns in turns_list]
 
-    # Score.
-    info('Scoring...', file=sys.stderr)
     for turns in turns_list:
         check_for_empty_files(turns, uem)
     out_turns = combine_turns_list(turns_list, file_ids)

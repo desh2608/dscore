@@ -128,7 +128,8 @@ def generate_rttm(turns, out_file):
     fmt = "SPEAKER {:s} 1 {:7.3f} {:7.3f} <NA> <NA> {:s} <NA>\n"
     with open(out_file, 'w') as fout:
         for turn in turns:
-            fout.write(fmt.format(turn.file_id, turn.onset, turn.dur, turn.speaker_id))
+            if (turn.dur >= 0.1):
+                fout.write(fmt.format(turn.file_id, turn.onset, turn.dur, turn.speaker_id))
     return
 
 def main():

@@ -32,7 +32,7 @@ from matplotlib import collections  as mc
 def load_rttms(rttm_list):
     """Loads speaker turns from input RTTMs in a list of turns."""
     turns = []
-    file_ids = set()
+    file_ids = []
     for rttm_fn in rttm_list:
         if not os.path.exists(rttm_fn):
             error('Unable to open RTTM file: %s' % rttm_fn)
@@ -40,11 +40,11 @@ def load_rttms(rttm_list):
         try:
             turns_, _, file_ids_ = load_rttm(rttm_fn)
             turns.append(turns_)
-            file_ids.add(file_ids_)
+            file_ids += list(file_ids_)
         except IOError as e:
             error('Invalid RTTM file: %s. %s' % (rttm_fn, e))
             sys.exit(1)
-    return turns, file_ids
+    return turns, set(file_ids)
 
 def check_for_empty_files(ref_turns, uem):
     """Warn on files in UEM without reference or speaker turns."""
@@ -64,12 +64,14 @@ def main():
         description='Apply new DOVER on diarization outputs.', add_help=True,
         usage='%(prog)s [options]')
     parser.add_argument(
-        '-i', type=argparse.FileType('r'), nargs='+', dest='fin',
-        help='Input RTTM files')
+        '-i', nargs='+', dest='fin', help='Input RTTM files')
     parser.add_argument(
         '-o', nargs='?', default='rttm_out', dest='fout',
-        type=argparse.FileType('w'),
         help='output RTTM file')
+    parser.add_argument(
+        '-t,--threshold', type=float, default=0.5, dest='threshold',
+        help='Speaker segment is retained if at least this fraction '
+        'of input RTTMs agree on it')
     parser.add_argument(
         '-u,--uem', nargs=None, metavar='STR', dest='uemf',
         help='un-partitioned evaluation map file (default: %(default)s)')
@@ -101,7 +103,16 @@ def main():
 
     for turns in turns_list:
         check_for_empty_files(turns, uem)
-    out_turns = combine_turns_list(turns_list, file_ids)
+    file_to_out_turns = combine_turns_list(turns_list, file_ids, args.threshold)
+
+    # Write output RTTM file
+    fmt = "SPEAKER {:s} 1 {:7.3f} {:7.3f} <NA> <NA> {:s} <NA>\n"
+    with open(args.fout, 'w') as fh:
+        for file_id in file_to_out_turns.keys():
+            turns = merge_turns(file_to_out_turns[file_id])
+            for turn in turns:
+                fh.write(fmt.format(file_id, turn.onset, turn.dur, turn.speaker_id))
+    return
 
 
 if __name__ == '__main__':

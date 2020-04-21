@@ -119,11 +119,22 @@ def get_mapped_turns_list(file_to_turns_list):
     file_to_mapped_turns_list = {}
     for file_id in file_to_turns_list.keys():
         turns_list = file_to_turns_list[file_id]
-        file_to_mapped_turns_list[file_id] = [turns_list[0]]
-        ref_turns = turns_list[0]
-        for sys_turns in turns_list[1:]:
-            mapped_sys_turns = get_mapped_turns(ref_turns, sys_turns)
-            file_to_mapped_turns_list[file_id].append(mapped_sys_turns)
+        min_cost = sys.maxsize
+        best_ref = 0
+        for i, ref_turns in enumerate(turns_list):
+            print ("Mapping using {} as reference".format(i))
+            cur_cost = 0
+            mapped_turns_list = [ref_turns]
+            for sys_turns in turns_list[1:]:
+                mapped_sys_turns, cost = get_mapped_turns(ref_turns, sys_turns)
+                mapped_turns_list.append(mapped_sys_turns)
+                cur_cost += cost
+            print ("Cost for file {} with ref {}: {}".format(file_id, i, cur_cost))
+            if cur_cost < min_cost:
+                min_cost = cur_cost
+                file_to_mapped_turns_list[file_id] = mapped_turns_list
+                best_ref = i
+        print ("{} is the best reference for file {}".format(best_ref, file_id))
     return file_to_mapped_turns_list
 
 def get_mapped_turns(ref_turns, sys_turns):
@@ -141,19 +152,20 @@ def get_mapped_turns(ref_turns, sys_turns):
     cost = np.array(cost)
     ref_spk_ids_map = {i:j for i,j in enumerate(ref_groups.keys())}
     sys_spk_ids_revmap = {j:i for i,j in enumerate(sys_groups.keys())}
-    best_map = weighted_bipartite_graph_match(cost)
+    best_map, min_cost = weighted_bipartite_graph_match(cost)
     mapped_sys_turns = []
     for turn in sys_turns:
         old_spk_id = turn.speaker_id
         new_spk_id = ref_spk_ids_map[best_map[sys_spk_ids_revmap[old_spk_id]]]
         turn.speaker_id = new_spk_id
         mapped_sys_turns.append(turn)
-    return mapped_sys_turns
+    return mapped_sys_turns, min_cost
 
 def weighted_bipartite_graph_match(cost):
-    _, ref_to_sys = linear_sum_assignment(cost)
+    tmp, ref_to_sys = linear_sum_assignment(cost)
     best_map = {j:i for i,j in enumerate(ref_to_sys)}
-    return best_map
+    min_cost = cost[tmp, ref_to_sys].sum()
+    return best_map, min_cost
 
 def compute_spk_overlap(ref_spk_turns, sys_spk_turns):
     ref_tree = IntervalTree.from_tuples([(turn.onset,turn.offset) for turn in ref_spk_turns])

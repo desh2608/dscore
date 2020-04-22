@@ -29,18 +29,21 @@ def combine_turns_list(turns_list, file_ids, threshold):
             else:
                 file_to_turns_list[fid] = [list(g)]
 
-    # First we map speaker labels in all RTTMs using the Hungarian algorithm
+    # First we map speaker labels in all RTTMs using the Hungarian algorithm.
+    # Each RTTM is used as reference and the one with the least cost is selected.
+    # The costs are used to obtain weights for the RTTMs, which will be used 
+    # for weighted voting.
     print ("Mapping speaker labels..")
-    file_to_mapped_turns_list = get_mapped_turns_list(file_to_turns_list)
+    file_to_mapped_turns_list, file_to_weights = get_mapped_turns_list(file_to_turns_list)
 
     # Now we apply the speaker-wise DOVER to combine the turns list for
     # each file (here, file means a session id or a recording id)
     print ("Applying DOVER-Lap")
-    file_to_combined_turns = get_combined_turns(file_to_mapped_turns_list, threshold)
+    file_to_combined_turns = get_combined_turns(file_to_mapped_turns_list, file_to_weights, threshold)
 
     return file_to_combined_turns
    
-def get_combined_turns(file_to_turns_list, threshold):
+def get_combined_turns(file_to_turns_list, file_to_weights, threshold):
     """
     This function takes turns list for all input RTTMs and performs
     the new DOVER-Lap for getting a combined output turns list.
@@ -48,11 +51,12 @@ def get_combined_turns(file_to_turns_list, threshold):
     file_to_combined_turns = {}
     for file_id in file_to_turns_list.keys():
         turns_list = file_to_turns_list[file_id]
-        combined_turns = doverlap(turns_list, file_id, threshold)
+        weights = file_to_weights[file_id]
+        combined_turns = doverlap(turns_list, file_id, weights, threshold)
         file_to_combined_turns[file_id] = combined_turns
     return file_to_combined_turns
 
-def doverlap(turns_list, file_id, threshold):
+def doverlap(turns_list, file_id, weights, threshold):
     """
     This method implements the actual DOVER-Lap algorithm
     """
@@ -70,12 +74,12 @@ def doverlap(turns_list, file_id, threshold):
     
     for spk_id in spk_to_turns_list.keys():
         spk_turns = spk_to_turns_list[spk_id]
-        combined_turns = combine_speaker_turns(spk_turns, spk_id, file_id, threshold)
+        combined_turns = combine_speaker_turns(spk_turns, spk_id, file_id, weights, threshold)
         all_combined_turns += combined_turns
     
     return all_combined_turns
 
-def combine_speaker_turns(turns_list, spk_id, file_id, threshold = 0.5):
+def combine_speaker_turns(turns_list, spk_id, file_id, weights, threshold = 0.5):
     """
     Given segments from different RTTMs for a single speaker, return
     their intersection, such that at least _threshold_ fraction of
@@ -102,10 +106,10 @@ def combine_speaker_turns(turns_list, spk_id, file_id, threshold = 0.5):
         cur_start = sorted_time_marks[i]
         cur_end = sorted_time_marks[i+1]
         num_present = 0
-        for tree in trees:
+        for j, tree in enumerate(trees):
             if tree.overlap(cur_start, cur_end):
-                num_present += 1
-        if (num_present >= threshold*num_files):
+                num_present += weights[j]
+        if (num_present >= threshold):
             combined_turns.append(Turn(cur_start, cur_end, speaker_id=spk_id, file_id=file_id))
     return combined_turns
 
@@ -117,10 +121,12 @@ def get_mapped_turns_list(file_to_turns_list):
     mapping which maximizes overlap duration.
     """
     file_to_mapped_turns_list = {}
+    file_to_weights = {}
     for file_id in file_to_turns_list.keys():
         turns_list = file_to_turns_list[file_id]
         min_cost = sys.maxsize
         best_ref = 0
+        weights = []
         for i, ref_turns in enumerate(turns_list):
             print ("Mapping using {} as reference".format(i))
             cur_cost = 0
@@ -130,12 +136,17 @@ def get_mapped_turns_list(file_to_turns_list):
                 mapped_turns_list.append(mapped_sys_turns)
                 cur_cost += cost
             print ("Cost for file {} with ref {}: {}".format(file_id, i, cur_cost))
+            weights.append(-1.0 * cur_cost)
             if cur_cost < min_cost:
                 min_cost = cur_cost
                 file_to_mapped_turns_list[file_id] = mapped_turns_list
                 best_ref = i
         print ("{} is the best reference for file {}".format(best_ref, file_id))
-    return file_to_mapped_turns_list
+        weights = np.array(weights)
+        weights /= np.linalg.norm(weights, ord=1)
+        print ("Array weights are {}".format(weights))
+        file_to_weights[file_id] = weights
+    return file_to_mapped_turns_list, file_to_weights
 
 def get_mapped_turns(ref_turns, sys_turns):
     cost = []

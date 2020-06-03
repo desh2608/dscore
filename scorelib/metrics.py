@@ -363,7 +363,7 @@ ERROR_SPEAKER_REO = re.compile(r'(?<=SPEAKER ERROR TIME =)[\d.]+')
 # TODO: Working with md-eval is a PITA, even with modifications to the
 #       reporting. Suggest looking into moving over to pyannote's
 #       implementation.
-def der(ref_turns, sys_turns, collar=0.0, ignore_overlaps=False, uem=None):
+def der(ref_turns, sys_turns, collar=0.0, ignore_overlaps=False, overlap_only=False, uem=None):
     """Return overall diarization error rate.
 
     Diarization error rate (DER), introduced for the NIST Rich Transcription
@@ -395,6 +395,10 @@ def der(ref_turns, sys_turns, collar=0.0, ignore_overlaps=False, uem=None):
 
         md-eval.pl -r ref.rttm -s sys.rttm -c collar -u uemf -1
 
+    Or, when ``overlap_only=True``:
+
+        md-eval.pl -r ref.rttm -s sys.rttm -c collar -u uemf -2
+
     Parameters
     ----------
     ref_turns : list of Turn
@@ -412,6 +416,11 @@ def der(ref_turns, sys_turns, collar=0.0, ignore_overlaps=False, uem=None):
     ignore_overlaps : bool, optional
         If True, ignore regions in the reference diarization in which more
         than one speaker is speaking.
+        (Default: False)
+
+    overlap_only : bool, optional
+        If True, only score regions in the reference RTTM where multiple
+        speakers are speaking.
         (Default: False)
 
     uem : UEM, optional
@@ -458,6 +467,8 @@ def der(ref_turns, sys_turns, collar=0.0, ignore_overlaps=False, uem=None):
               ]
         if ignore_overlaps:
             cmd.append('-1')
+        if overlap_only:
+            cmd.append('-2')
         stdout = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
     except subprocess.CalledProcessError as e:
         stdout = e.output
@@ -469,6 +480,7 @@ def der(ref_turns, sys_turns, collar=0.0, ignore_overlaps=False, uem=None):
     file_ids = [m.strip() for m in FILE_REO.findall(stdout)]
     file_ids = [file_id[2:] if file_id.startswith('f=') else file_id
                 for file_id in file_ids]
+    
     scored_speaker_times = np.array(
         [float(m) for m in SCORED_SPEAKER_REO.findall(stdout)])
     miss_speaker_times = np.array(
@@ -477,6 +489,7 @@ def der(ref_turns, sys_turns, collar=0.0, ignore_overlaps=False, uem=None):
         [float(m) for m in FA_SPEAKER_REO.findall(stdout)])
     error_speaker_times = np.array(
         [float(m) for m in ERROR_SPEAKER_REO.findall(stdout)])
+    
     with np.errstate(invalid='ignore', divide='ignore'):
         error_times = miss_speaker_times + fa_speaker_times + error_speaker_times
         ders = error_times / scored_speaker_times

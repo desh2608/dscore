@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """Score diarization system output.
 
 To evaluate system output stored in RTTM files ``sys1.rttm``, ``sys2.rttm``,
@@ -234,6 +234,12 @@ def main():
         '--ignore_overlaps', action='store_true', default=False,
         help='ignore overlaps when computing DER')
     parser.add_argument(
+        '--overlap_only', action='store_true', default=False,
+        help='score overlapping regions only')
+    parser.add_argument(
+        '--global_only', action='store_true', default=True,
+        help='Only print the global DER and JER')
+    parser.add_argument(
         '--jer_min_ref_dur', nargs=None, default=0.0, metavar='FLOAT',
         help='minimum reference speaker duration for JER '
         '(default: %(default)s)')
@@ -268,43 +274,54 @@ def main():
         error('No system RTTMs specified.')
         sys.exit(1)
 
+    # Check that at most one of ignore_overlaps and overlap_only is true
+    if (args.ignore_overlaps and args.overlap_only):
+        error('Both ignore_overlaps and overlap_only cannot be true.')
+        sys.exit(1)
+
     # Load speaker/reference speaker turns and UEM. If no UEM specified,
     # determine it automatically.
-    info('Loading speaker turns from reference RTTMs...', file=sys.stderr)
+    # info('Loading speaker turns from reference RTTMs...', file=sys.stderr)
     ref_turns, _ = load_rttms(args.ref_rttm_fns)
-    info('Loading speaker turns from system RTTMs...', file=sys.stderr)
+    # info('Loading speaker turns from system RTTMs...', file=sys.stderr)
     sys_turns, _ = load_rttms(args.sys_rttm_fns)
     if args.uemf is not None:
         info('Loading universal evaluation map...', file=sys.stderr)
         uem = load_uem(args.uemf)
     else:
-        warn('No universal evaluation map specified. Approximating from '
-             'reference and speaker turn extents...')
+        # warn('No universal evaluation map specified. Approximating from '
+        #      'reference and speaker turn extents...')
         uem = gen_uem(ref_turns, sys_turns)
 
     # Trim turns to UEM scoring regions and merge any that overlap.
-    info('Trimming reference speaker turns to UEM scoring regions...',
-         file=sys.stderr)
+    # info('Trimming reference speaker turns to UEM scoring regions...',
+    #      file=sys.stderr)
     ref_turns = trim_turns(ref_turns, uem)
-    info('Trimming system speaker turns to UEM scoring regions...',
-         file=sys.stderr)
+    # info('Trimming system speaker turns to UEM scoring regions...',
+    #      file=sys.stderr)
     sys_turns = trim_turns(sys_turns, uem)
-    info('Checking for overlapping reference speaker turns...',
-         file=sys.stderr)
+    # info('Checking for overlapping reference speaker turns...',
+    #      file=sys.stderr)
     ref_turns = merge_turns(ref_turns)
-    info('Checking for overlapping system speaker turns...',
-         file=sys.stderr)
+    # info('Checking for overlapping system speaker turns...',
+    #      file=sys.stderr)
     sys_turns = merge_turns(sys_turns)
 
     # Score.
-    info('Scoring...', file=sys.stderr)
+    # info('Scoring...', file=sys.stderr)
     check_for_empty_files(ref_turns, sys_turns, uem)
     file_scores, global_scores = score(
         ref_turns, sys_turns, uem, step=args.step,
         jer_min_ref_dur=args.jer_min_ref_dur, collar=args.collar,
-        ignore_overlaps=args.ignore_overlaps)
-    print_table(
-        file_scores, global_scores, args.n_digits, args.table_format)
+        ignore_overlaps=args.ignore_overlaps, overlap_only=args.overlap_only)
+    if (args.global_only):
+        if (args.overlap_only):
+            print ("DER: {:.2f}".format(global_scores.der))
+        else:
+            print ("DER: {:.2f} JER: {:.2f}".format(global_scores.der, global_scores.jer))
+    else:
+        print_table(
+            file_scores, global_scores, args.n_digits, args.table_format)
 
 
 if __name__ == '__main__':

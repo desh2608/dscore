@@ -108,8 +108,8 @@ def merge_turns(turns):
                          file_id=file_id))
             speaker_turns = sorted(
                 speaker_turns, key=lambda x: (x.onset, x.offset))
-            warn('Merging overlapping speaker turns. '
-                 'FILE: %s, SPEAKER: %s' % (file_id, speaker_id))
+            # warn('Merging overlapping speaker turns. '
+            #      'FILE: %s, SPEAKER: %s' % (file_id, speaker_id))
         new_turns.extend(speaker_turns)
     return new_turns
 

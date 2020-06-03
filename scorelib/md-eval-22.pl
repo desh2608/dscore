@@ -252,6 +252,8 @@ my $usage = "\n\nUsage: $0 [-h] -r <ref_file> -s <src_file>\n\n".
     "       Default value is $default_collar seconds.\n".
     "    -1 to limit scoring to those time regions in which only a single\n".
     "       speaker is speaking\n".
+	"    -2 to limit scoring to those time regions in which overlapping speakers\n".
+	"       are speaking\n".
     "    -y <name> to select named no-eval conditions for metadata\n".
     "    -Y <name> to select named no-score conditions for metadata\n".
     "    -z <name> to select named no-eval conditions for speaker diarization\n".
@@ -273,11 +275,11 @@ my ($date, $time) = date_time_stamp();
 print "command line (run on $date at $time) Version: $version  ", $0, " ", join(" ", @ARGV), "\n";
 
 use vars qw ($opt_h $opt_w $opt_W $opt_d $opt_D $opt_R $opt_r $opt_S $opt_s $opt_l $opt_c $opt_x);
-use vars qw ($opt_t $opt_T $opt_g $opt_p $opt_P $opt_o $opt_a $opt_A $opt_u $opt_1 $opt_m $opt_v $opt_e);
+use vars qw ($opt_t $opt_T $opt_g $opt_p $opt_P $opt_o $opt_a $opt_A $opt_u $opt_1 $opt_2 $opt_m $opt_v $opt_e);
 use vars qw ($opt_y $opt_Y $opt_z $opt_Z $opt_n $opt_M);
 $opt_y = $opt_Y = $opt_z = $opt_Z = "DEFAULT";
 use Getopt::Std;
-getopts ('nhdDwWox1mvec:R:r:S:s:t:T:g:p:P:a:A:u:l:y:Y:z:Z:M:');
+getopts ('nhdDwWox12mvec:R:r:S:s:t:T:g:p:P:a:A:u:l:y:Y:z:Z:M:');
 not defined $opt_h or die
     "\n$usage";
 defined $opt_r or defined $opt_R or die
@@ -637,6 +639,7 @@ sub evaluate {
 	    $uem_md_eval = add_exclusion_zones_to_uem ($noeval_md, $uem, $ref_rttm);
 	    $uem_md_score = add_exclusion_zones_to_uem ($noscore_md, $uem_md_eval, $ref_rttm);
 	    $uem_md_score = exclude_overlapping_speech_from_uem ($uem_md_score, $ref_rttm) if $opt_1;
+		$uem_md_score = exclude_single_speech_from_uem($uem_md_score, $ref_rttm) if $opt_2;
  	    tag_scoreable_words ($ref_wds, $uem_md_score);
 	    foreach $type (sort keys %md_subtypes) {
 		$ref_mds = $ref_data->{$file}{$chnl}{$type};
@@ -1915,6 +1918,7 @@ sub score_speaker_diarization {
     $noscore_nl->{"NON-LEX"} = $noscore_sd->{"NON-LEX"};
     $uem_score = add_exclusion_zones_to_uem ($noscore_nl, $uem_score, $rttm_data, $max_extend);
     $uem_score = exclude_overlapping_speech_from_uem ($uem_score, $rttm_data) if $opt_1;
+	$uem_score = exclude_single_speech_from_uem ($uem_score, $rttm_data) if $opt_2;
     tag_scoreable_words ($ref_wds, $uem_score);
     $score_segs = create_speaker_segs ($uem_score, $ref_spkr_data, $sys_spkr_data);
     print_speaker_segs ($score_segs, $file, $chnl) if $opt_v;
@@ -2108,6 +2112,72 @@ sub exclude_overlapping_speech_from_uem {
 		     ($a->{TIME} > $b->{TIME} ? 1 :
 		      $a->{EVENT} eq "BEG"))} @events;
 
+    my $tbeg = my $evl_cnt = my $nsz_cnt = my $evaluating = 0;
+    foreach $event (@events) {
+	$evl_cnt += $event->{EVENT} eq "BEG" ? 1 : -1 if $event->{TYPE} eq "UEM";
+	$nsz_cnt += $event->{EVENT} eq "BEG" ? 1 : -1 if $event->{TYPE} eq "NSZ";
+	if ($evaluating and
+	    ($evl_cnt == 0 or $nsz_cnt > 0) and
+	    $event->{TIME} > $tbeg) {
+	    push @$uem_ex, {TBEG => $tbeg, TEND => $event->{TIME}};
+	    $evaluating = 0;
+	}
+	elsif ($evl_cnt > 0 and $nsz_cnt == 0) {
+	    $tbeg = $event->{TIME};
+	    $evaluating = 1;
+	}
+    }
+	    
+    return $uem_ex;
+}
+
+#################################
+
+	sub exclude_single_speech_from_uem {
+    
+    my ($uem_data, $rttm_data) = @_;
+    my ($token, @spkr_events, @single_events, $event, $spkr_count, $tbeg_single, $uem, @events, $uem_ex);
+    
+#single speaker segments computed from SPEAKER data
+    foreach $token (@$rttm_data) {
+	next unless ($token->{TYPE} eq "SPEAKER" and
+		     $token->{TDUR} > 0);
+	push @spkr_events, {EVENT => "BEG", TIME => $token->{TBEG}, SPKR => $token->{SPKR}};
+	push @spkr_events, {EVENT => "END", TIME => $token->{TEND}, SPKR => $token->{SPKR}};
+    }
+    @spkr_events = sort {($a->{TIME} < $b->{TIME} ? -1 :
+			  ($a->{TIME} > $b->{TIME} ? 1 :
+			   $a->{EVENT} eq "BEG"))} @spkr_events;
+  
+#create noscore zones
+    foreach $event (@spkr_events) {
+	if ($event->{EVENT} eq "BEG") {
+	    if (++$spkr_count == 1) {
+        $tbeg_single = $event->{TIME};
+      } elsif ($spkr_count == 2) {
+        push @events, {TYPE => "NSZ", EVENT => "BEG", TIME => $tbeg_single};
+        push @events, {TYPE => "NSZ", EVENT => "END", TIME => $event->{TIME}};
+      }
+	}
+	else {
+	    if (--$spkr_count == 1) {
+        $tbeg_single = $event->{TIME};
+      } elsif ($spkr_count == 0) {
+        push @events, {TYPE => "NSZ", EVENT => "BEG", TIME => $tbeg_single};
+        push @events, {TYPE => "NSZ", EVENT => "END", TIME => $event->{TIME}};
+      }
+	}
+    }
+	
+#merge noscore zones with UEM data
+    foreach $uem (@$uem_data) {
+	next unless $uem->{TEND}-$uem->{TBEG} > 0;
+	push @events, {TYPE => "UEM", EVENT => "BEG", TIME => $uem->{TBEG}};
+	push @events, {TYPE => "UEM", EVENT => "END", TIME => $uem->{TEND}};
+    }
+    @events = sort {($a->{TIME} < $b->{TIME} ? -1 :
+		     ($a->{TIME} > $b->{TIME} ? 1 :
+		      $a->{EVENT} eq "BEG"))} @events;
     my $tbeg = my $evl_cnt = my $nsz_cnt = my $evaluating = 0;
     foreach $event (@events) {
 	$evl_cnt += $event->{EVENT} eq "BEG" ? 1 : -1 if $event->{TYPE} eq "UEM";
@@ -2370,51 +2440,20 @@ sub print_sd_scores {
 
     printf "\n*** Performance analysis for Speaker Diarization for $condition ***\n\n";
 
-    #printf "    EVAL TIME =%10.2f secs\n", $scores->{EVAL_TIME};
-    #printf "  EVAL SPEECH =%10.2f secs (%5.1f percent of evaluated time)\n", $scores->{EVAL_SPEECH},
-    #    100*$scores->{EVAL_SPEECH}/$scores->{EVAL_TIME};
-    #printf "  SCORED TIME =%10.2f secs (%5.1f percent of evaluated time)\n",
-    #    $scores->{SCORED_TIME}, 100*$scores->{SCORED_TIME}/$scores->{EVAL_TIME};
-    #printf "SCORED SPEECH =%10.2f secs (%5.1f percent of scored time)\n",
-    #    $scores->{SCORED_SPEECH}, 100*$scores->{SCORED_SPEECH}/$scores->{SCORED_TIME};
-    #printf "   EVAL WORDS =%7d        \n", $scores->{EVAL_WORDS};
-    #printf " SCORED WORDS =%7d         (%5.1f percent of evaluated words)\n",
-    #    $scores->{SCORED_WORDS}, 100*$scores->{SCORED_WORDS}/$scores->{EVAL_WORDS};
-    #print "---------------------------------------------\n";
-    #printf "MISSED SPEECH =%10.2f secs (%5.1f percent of scored time)\n",
-    ##    $scores->{MISSED_SPEECH}, 100*$scores->{MISSED_SPEECH}/$scores->{SCORED_TIME};
-    #printf "FALARM SPEECH =%10.2f secs (%5.1f percent of scored time)\n",
-    #    $scores->{FALARM_SPEECH}, 100*$scores->{FALARM_SPEECH}/$scores->{SCORED_TIME};
-    #printf " MISSED WORDS =%7d         (%5.1f percent of scored words)\n",
-    #    $scores->{MISSED_WORDS}, 100*$scores->{MISSED_WORDS}/$scores->{SCORED_WORDS};
-    #print "---------------------------------------------\n";
-    #printf "SCORED SPEAKER TIME =%10.2f secs (%5.1f percent of scored speech)\n",
-    #    $scores->{SCORED_SPEAKER}, 100*$scores->{SCORED_SPEAKER}/$scores->{SCORED_SPEECH};
-    #printf "MISSED SPEAKER TIME =%10.2f secs (%5.1f percent of scored speaker time)\n",
-    #    $scores->{MISSED_SPEAKER}, 100*$scores->{MISSED_SPEAKER}/$scores->{SCORED_SPEAKER};
-    #printf "FALARM SPEAKER TIME =%10.2f secs (%5.1f percent of scored speaker time)\n",
-    #    $scores->{FALARM_SPEAKER}, 100*$scores->{FALARM_SPEAKER}/$scores->{SCORED_SPEAKER};
-    #printf " SPEAKER ERROR TIME =%10.2f secs (%5.1f percent of scored speaker time)\n",
-    #    $scores->{SPEAKER_ERROR}, 100*$scores->{SPEAKER_ERROR}/$scores->{SCORED_SPEAKER};
-    #printf "SPEAKER ERROR WORDS =%7d         (%5.1f percent of scored speaker words)\n",
-    #    $scores->{ERROR_WORDS}, 100*$scores->{ERROR_WORDS}/$scores->{SCORED_WORDS};
-    #print "---------------------------------------------\n";
-    #
-    #
-    #
     printf "SCORED SPEAKER TIME =%f secs\n", $scores->{SCORED_SPEAKER};
     printf "MISSED SPEAKER TIME =%f secs\n", $scores->{MISSED_SPEAKER};
     printf "FALARM SPEAKER TIME =%f secs\n", $scores->{FALARM_SPEAKER};
     printf "SPEAKER ERROR TIME =%f secs\n", $scores->{SPEAKER_ERROR};    
-#    if ($condition eq "ALL") {
-#      printf " OVERALL SPEAKER DIARIZATION ERROR = %.2f percent of scored speaker time\n",
-#         100*($scores->{MISSED_SPEAKER} + $scores->{FALARM_SPEAKER} + $scores->{SPEAKER_ERROR})/
-#	    $scores->{SCORED_SPEAKER};
-#    } else {
-      printf " OVERALL SPEAKER DIARIZATION ERROR = %.2f percent of scored speaker time  %s\n",
-         100*($scores->{MISSED_SPEAKER} + $scores->{FALARM_SPEAKER} + $scores->{SPEAKER_ERROR})/
-    	    $scores->{SCORED_SPEAKER}, "`($condition)";
-#    }
+
+	if ( $scores->{SCORED_SPEAKER} == 0 ) {
+		printf " OVERALL SPEAKER DIARIZATION ERROR = %.2f percent of scored speaker time  %s\n",
+			0, "`($condition)";
+	} else {
+		printf " OVERALL SPEAKER DIARIZATION ERROR = %.2f percent of scored speaker time  %s\n",
+			100*($scores->{MISSED_SPEAKER} + $scores->{FALARM_SPEAKER} + $scores->{SPEAKER_ERROR})/
+			$scores->{SCORED_SPEAKER}, "`($condition)";		
+	}
+
     print "---------------------------------------------\n";
     printf " Speaker type confusion matrix -- speaker weighted\n";
     summarize_speaker_type_performance ("NSPK", $scores->{TYPE}{NSPK});

@@ -100,58 +100,45 @@ class Scores(namedtuple(
          'bcubed_f1', 'tau_ref_sys', 'tau_sys_ref', 'ce_ref_sys',
          'ce_sys_ref', 'mi', 'nmi'])):
     """Structure containing metrics.
-
     Parameters
     ----------
     file_id : str
         File id for file scored.
-
     der : float
         Diarization error rate in percent.
-
     jer : float
         Jaccard error rate in percent.
-
     bcubed_precision : float
         B-cubed precision.
-
     bcubed_recall : float
         B-cubed recall.
-
     bcubed_f1 : float
         B-cubed F1.
-
     tau_ref_sys : float
         Value between 0 and 1 that is high when the reference diarization is
         predictive of the system diarization and low when the reference
         diarization provides essentially no information about the system
         diarization.
-
     tau_sys_ref : float
         Value between 0 and 1 that is high when the system diarization is
         predictive of the reference diarization and low when the system
         diarization provides essentially no information about the reference
         diarization.
-
     ce_ref_sys : float
         Conditional entropy of the reference diarization given the system
         diarization.
-
     ce_sys_ref : float
         Conditional entropy of the system diarization given the reference
         diarization.
-
     mi : float
         Mutual information.
-
     nmi : float
         Normalized mutual information.
     """
     __slots__ = ()
 
-
-def score(ref_turns, sys_turns, uem, step=0.010, nats=False, jer_min_ref_dur=0.0,
-          **kwargs):
+def score(ref_turns, sys_turns, uem, step=0.010, nats=False, 
+        jer_min_ref_dur=0.0, **kwargs):
     """Score diarization.
 
     Parameters
